@@ -1,0 +1,1243 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>GEOLINK — Location-Aware Autocomplete</title>
+  <meta name="description" content="GEOLINK: real-time location autocomplete over 12 million place names, personalised by search history." />
+
+  <link rel="stylesheet" href="https://unpkg.com/leaflet@1.9.4/dist/leaflet.css" />
+  <link rel="preconnect" href="https://fonts.googleapis.com" />
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
+  <link href="https://fonts.googleapis.com/css2?family=Outfit:wght@300;400;500;600;700&family=JetBrains+Mono:wght@400;500&display=swap" rel="stylesheet" />
+
+  <style>
+    *, *::before, *::after { box-sizing: border-box; margin: 0; padding: 0; }
+
+    :root {
+      --bg:           #080b12;
+      --panel-bg:     #0c0f18;
+      --surface:      rgba(255,255,255,0.04);
+      --surface-2:    rgba(255,255,255,0.07);
+      --surface-3:    rgba(255,255,255,0.11);
+      --border:       rgba(255,255,255,0.08);
+      --border-mid:   rgba(255,255,255,0.12);
+      --border-focus: rgba(56,189,248,0.65);
+      --text:         #e8edf5;
+      --text-muted:   #64748b;
+      --text-dim:     #3d4a5c;
+      --accent:       #38bdf8;
+      --accent-dim:   rgba(56,189,248,0.12);
+      --accent-glow:  rgba(56,189,248,0.20);
+      --gold:         #fbbf24;
+      --gold-dim:     rgba(251,191,36,0.12);
+      --green:        #34d399;
+      --green-glow:   rgba(52,211,153,0.4);
+      --red:          #f87171;
+      --panel-w:      420px;
+      --radius:       12px;
+      --radius-sm:    8px;
+      --radius-xs:    5px;
+      --trans:        0.16s cubic-bezier(0.4,0,0.2,1);
+      --trans-slow:   0.3s cubic-bezier(0.4,0,0.2,1);
+    }
+
+    html, body {
+      height: 100%;
+      font-family: 'Outfit', sans-serif;
+      background: var(--bg);
+      color: var(--text);
+      overflow: hidden;
+      -webkit-font-smoothing: antialiased;
+    }
+
+    /* ── Layout ────────────────────────────────────────────────────────────── */
+    #app { display: flex; height: 100vh; }
+
+    /* ── Panel ─────────────────────────────────────────────────────────────── */
+    #panel {
+      width: var(--panel-w);
+      min-width: var(--panel-w);
+      height: 100%;
+      display: flex;
+      flex-direction: column;
+      background: var(--panel-bg);
+      border-right: 1px solid var(--border);
+      z-index: 1000;
+      overflow: hidden;
+      position: relative;
+    }
+
+    /* subtle noise grain overlay on panel */
+    #panel::before {
+      content: '';
+      position: absolute;
+      inset: 0;
+      background-image: url("data:image/svg+xml,%3Csvg viewBox='0 0 256 256' xmlns='http://www.w3.org/2000/svg'%3E%3Cfilter id='noise'%3E%3CfeTurbulence type='fractalNoise' baseFrequency='0.9' numOctaves='4' stitchTiles='stitch'/%3E%3C/filter%3E%3Crect width='100%25' height='100%25' filter='url(%23noise)' opacity='0.03'/%3E%3C/svg%3E");
+      pointer-events: none;
+      z-index: 0;
+      opacity: 0.4;
+    }
+
+    #panel > * { position: relative; z-index: 1; }
+
+    /* ── Header ────────────────────────────────────────────────────────────── */
+    #panel-header {
+      padding: 20px 20px 16px;
+      border-bottom: 1px solid var(--border);
+      background: linear-gradient(160deg, rgba(56,189,248,0.06) 0%, transparent 55%);
+      flex-shrink: 0;
+    }
+
+    .logo {
+      display: flex;
+      align-items: center;
+      gap: 11px;
+      margin-bottom: 6px;
+    }
+
+    .logo-icon {
+      width: 34px;
+      height: 34px;
+      border-radius: 9px;
+      background: linear-gradient(135deg, #0ea5e9, #2563eb);
+      display: grid;
+      place-items: center;
+      flex-shrink: 0;
+      box-shadow: 0 0 0 1px rgba(56,189,248,0.3), 0 4px 20px rgba(56,189,248,0.25);
+    }
+
+    .logo-icon svg { width: 18px; height: 18px; }
+
+    .logo-wordmark {
+      display: flex;
+      flex-direction: column;
+      gap: 0;
+    }
+
+    .logo-text {
+      font-size: 17px;
+      font-weight: 700;
+      letter-spacing: 0.12em;
+      color: var(--text);
+      line-height: 1;
+    }
+
+    .logo-text em {
+      font-style: normal;
+      color: var(--accent);
+    }
+
+    .logo-sub {
+      font-size: 9.5px;
+      font-weight: 500;
+      letter-spacing: 0.18em;
+      color: var(--text-dim);
+      text-transform: uppercase;
+      margin-top: 2px;
+    }
+
+    .tagline {
+      font-size: 11.5px;
+      color: var(--text-muted);
+      margin-left: 45px;
+      letter-spacing: 0.01em;
+    }
+
+    /* ── Search ────────────────────────────────────────────────────────────── */
+    #search-wrap {
+      padding: 14px 16px 0;
+      position: relative;
+      flex-shrink: 0;
+    }
+
+    #search-icon {
+      position: absolute;
+      left: 30px;
+      top: 50%;
+      transform: translateY(-50%);
+      pointer-events: none;
+      color: var(--text-muted);
+      transition: color var(--trans);
+      display: flex;
+      align-items: center;
+    }
+
+    #search-wrap:focus-within #search-icon { color: var(--accent); }
+
+    #search-input {
+      width: 100%;
+      padding: 11px 38px 11px 38px;
+      background: var(--surface-2);
+      border: 1px solid var(--border-mid);
+      border-radius: var(--radius-sm);
+      color: var(--text);
+      font-size: 13.5px;
+      font-family: 'Outfit', sans-serif;
+      font-weight: 400;
+      outline: none;
+      transition: border-color var(--trans), box-shadow var(--trans), background var(--trans);
+      letter-spacing: 0.01em;
+    }
+
+    #search-input::placeholder { color: var(--text-dim); }
+
+    #search-input:focus {
+      border-color: var(--border-focus);
+      background: var(--surface-3);
+      box-shadow: 0 0 0 3px var(--accent-glow), inset 0 1px 0 rgba(56,189,248,0.05);
+    }
+
+    #clear-btn {
+      position: absolute;
+      right: 26px;
+      top: 50%;
+      transform: translateY(-50%);
+      background: none;
+      border: none;
+      color: var(--text-muted);
+      cursor: pointer;
+      font-size: 14px;
+      padding: 4px;
+      display: none;
+      transition: color var(--trans);
+      line-height: 1;
+    }
+    #clear-btn:hover { color: var(--text); }
+
+    /* spinner */
+    #spinner {
+      position: absolute;
+      right: 26px;
+      top: 50%;
+      transform: translateY(-50%);
+      width: 15px;
+      height: 15px;
+      display: none;
+      border: 1.5px solid var(--border-mid);
+      border-top-color: var(--accent);
+      border-radius: 50%;
+      animation: spin 0.65s linear infinite;
+    }
+    @keyframes spin { to { transform: translateY(-50%) rotate(360deg); } }
+
+    /* ── Controls ──────────────────────────────────────────────────────────── */
+    #controls {
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+      padding: 10px 16px 0;
+      flex-shrink: 0;
+    }
+
+    .results-count {
+      font-size: 11px;
+      color: var(--text-muted);
+      font-family: 'JetBrains Mono', monospace;
+      letter-spacing: 0.02em;
+    }
+
+    .controls-right { display: flex; align-items: center; gap: 8px; }
+
+    /* pill toggle */
+    .toggle-wrap { display: flex; align-items: center; gap: 7px; cursor: pointer; }
+    .toggle-label { font-size: 11px; color: var(--text-muted); user-select: none; letter-spacing: 0.01em; }
+
+    .toggle-switch { position: relative; width: 34px; height: 19px; cursor: pointer; }
+    .toggle-switch input { opacity: 0; width: 0; height: 0; position: absolute; }
+    .toggle-track {
+      position: absolute;
+      inset: 0;
+      border-radius: 19px;
+      background: var(--surface-3);
+      border: 1px solid var(--border-mid);
+      transition: background var(--trans), border-color var(--trans);
+    }
+    .toggle-switch input:checked ~ .toggle-track {
+      background: linear-gradient(135deg, #0ea5e9, #2563eb);
+      border-color: transparent;
+      box-shadow: 0 0 10px rgba(56,189,248,0.3);
+    }
+    .toggle-thumb {
+      position: absolute;
+      top: 2.5px;
+      left: 2.5px;
+      width: 12px;
+      height: 12px;
+      border-radius: 50%;
+      background: #fff;
+      transition: transform var(--trans);
+      box-shadow: 0 1px 4px rgba(0,0,0,0.5);
+    }
+    .toggle-switch input:checked ~ .toggle-track .toggle-thumb { transform: translateX(15px); }
+
+    .clear-history-btn {
+      background: none;
+      border: 1px solid var(--border);
+      color: var(--text-muted);
+      font-size: 10.5px;
+      font-weight: 500;
+      font-family: 'Outfit', sans-serif;
+      border-radius: var(--radius-xs);
+      padding: 3px 8px;
+      cursor: pointer;
+      letter-spacing: 0.02em;
+      transition: all var(--trans);
+    }
+    .clear-history-btn:hover {
+      background: rgba(248,113,113,0.08);
+      color: var(--red);
+      border-color: rgba(248,113,113,0.3);
+    }
+    .clear-history-btn:active { transform: scale(0.95); }
+
+    /* ── Divider ───────────────────────────────────────────────────────────── */
+    .divider {
+      height: 1px;
+      background: var(--border);
+      margin: 10px 0 0;
+      flex-shrink: 0;
+    }
+
+    /* ── Results list ──────────────────────────────────────────────────────── */
+    #results {
+      flex: 1;
+      overflow-y: auto;
+      padding: 6px 10px 8px;
+      scrollbar-width: thin;
+      scrollbar-color: rgba(255,255,255,0.08) transparent;
+    }
+    #results::-webkit-scrollbar { width: 3px; }
+    #results::-webkit-scrollbar-track { background: transparent; }
+    #results::-webkit-scrollbar-thumb { background: rgba(255,255,255,0.08); border-radius: 3px; }
+    #results::-webkit-scrollbar-thumb:hover { background: rgba(255,255,255,0.14); }
+
+    /* ── Result card ───────────────────────────────────────────────────────── */
+    .result-item {
+      display: flex;
+      align-items: flex-start;
+      gap: 11px;
+      padding: 10px 12px 10px 14px;
+      border-radius: var(--radius-sm);
+      cursor: pointer;
+      position: relative;
+      border: 1px solid transparent;
+      transition: background var(--trans), border-color var(--trans);
+      animation: fadeIn 0.18s ease both;
+    }
+
+    /* left accent bar */
+    .result-item::before {
+      content: '';
+      position: absolute;
+      left: 0;
+      top: 20%;
+      bottom: 20%;
+      width: 2px;
+      border-radius: 2px;
+      background: var(--accent);
+      opacity: 0;
+      transition: opacity var(--trans);
+    }
+
+    .result-item:hover {
+      background: var(--surface-2);
+      border-color: var(--border);
+    }
+    .result-item:hover::before { opacity: 0.5; }
+
+    .result-item.selected {
+      background: var(--accent-dim);
+      border-color: rgba(56,189,248,0.22);
+    }
+    .result-item.selected::before { opacity: 1; }
+
+    @keyframes fadeIn {
+      from { opacity: 0; transform: translateY(3px); }
+      to   { opacity: 1; transform: translateY(0); }
+    }
+
+    .result-flag {
+      font-size: 24px;
+      flex-shrink: 0;
+      line-height: 1;
+      margin-top: 0;
+      filter: drop-shadow(0 1px 3px rgba(0,0,0,0.4));
+    }
+
+    .result-body { flex: 1; min-width: 0; }
+
+    .result-name {
+      font-size: 13.5px;
+      font-weight: 600;
+      white-space: nowrap;
+      overflow: hidden;
+      text-overflow: ellipsis;
+      color: var(--text);
+      letter-spacing: 0.01em;
+    }
+
+    .result-meta {
+      margin-top: 3px;
+      display: flex;
+      flex-wrap: wrap;
+      align-items: center;
+      gap: 4px;
+    }
+
+    .result-tag {
+      background: var(--surface-2);
+      border: 1px solid var(--border);
+      border-radius: 4px;
+      padding: 1px 6px;
+      font-size: 10px;
+      font-weight: 500;
+      color: var(--text-muted);
+      letter-spacing: 0.03em;
+    }
+
+    .result-pop {
+      font-size: 10.5px;
+      color: var(--text-dim);
+      font-family: 'JetBrains Mono', monospace;
+      margin-top: 3px;
+    }
+
+    /* score bar */
+    .result-score-bar {
+      height: 1.5px;
+      border-radius: 2px;
+      margin-top: 6px;
+      background: linear-gradient(90deg, var(--accent) 0%, rgba(56,189,248,0.15) 100%);
+      transition: width var(--trans-slow);
+    }
+
+    /* boosted badge */
+    .badge-boosted {
+      display: inline-flex;
+      align-items: center;
+      gap: 3px;
+      background: var(--gold-dim);
+      border: 1px solid rgba(251,191,36,0.25);
+      color: var(--gold);
+      border-radius: 4px;
+      padding: 1px 6px;
+      font-size: 9.5px;
+      font-weight: 600;
+      letter-spacing: 0.05em;
+      animation: goldPulse 2.5s ease-in-out infinite;
+    }
+    @keyframes goldPulse {
+      0%, 100% { box-shadow: none; }
+      50%       { box-shadow: 0 0 6px rgba(251,191,36,0.25); }
+    }
+
+    /* ── Section headers (recommendations) ─────────────────────────────────── */
+    .section-header {
+      display: flex;
+      align-items: center;
+      gap: 7px;
+      padding: 10px 14px 5px;
+      border-top: 1px solid var(--border);
+    }
+    .section-header:first-child { border-top: none; }
+    .section-header-icon { font-size: 12px; }
+    .section-header-label {
+      font-size: 10.5px;
+      color: var(--text-dim);
+      font-weight: 600;
+      letter-spacing: 0.08em;
+      text-transform: uppercase;
+    }
+
+    /* ── Skeleton loader ───────────────────────────────────────────────────── */
+    .skeleton-item {
+      display: flex;
+      align-items: flex-start;
+      gap: 11px;
+      padding: 10px 12px 10px 14px;
+      border-radius: var(--radius-sm);
+      border: 1px solid transparent;
+    }
+    .sk-flag {
+      width: 28px;
+      height: 28px;
+      border-radius: 6px;
+      background: var(--surface-2);
+      flex-shrink: 0;
+      animation: shimmer 1.4s ease infinite;
+    }
+    .sk-body { flex: 1; display: flex; flex-direction: column; gap: 6px; padding-top: 2px; }
+    .sk-line {
+      height: 10px;
+      border-radius: 5px;
+      background: var(--surface-2);
+      animation: shimmer 1.4s ease infinite;
+    }
+    .sk-line.wide  { width: 65%; }
+    .sk-line.med   { width: 40%; }
+    .sk-line.short { width: 28%; }
+    @keyframes shimmer {
+      0%, 100% { opacity: 0.5; }
+      50%       { opacity: 1; }
+    }
+
+    /* ── Empty / error states ──────────────────────────────────────────────── */
+    .state-msg {
+      display: flex;
+      flex-direction: column;
+      align-items: center;
+      justify-content: center;
+      gap: 8px;
+      padding: 36px 24px;
+      color: var(--text-muted);
+      font-size: 13px;
+      text-align: center;
+    }
+    .state-icon { font-size: 32px; margin-bottom: 2px; }
+    .state-title { font-size: 13px; font-weight: 500; color: var(--text-muted); }
+    .state-sub { font-size: 11.5px; color: var(--text-dim); line-height: 1.5; }
+
+    /* crosshair empty state SVG */
+    .empty-graphic {
+      width: 64px;
+      height: 64px;
+      margin-bottom: 4px;
+      opacity: 0.18;
+    }
+
+    /* ── Scroll sentinel ───────────────────────────────────────────────────── */
+    #scroll-sentinel {
+      height: 44px;
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      gap: 5px;
+    }
+    .dot-loader span {
+      display: inline-block;
+      width: 4px;
+      height: 4px;
+      border-radius: 50%;
+      background: var(--text-dim);
+      animation: dotBounce 1.2s ease infinite;
+    }
+    .dot-loader span:nth-child(2) { animation-delay: 0.15s; }
+    .dot-loader span:nth-child(3) { animation-delay: 0.30s; }
+    @keyframes dotBounce {
+      0%, 80%, 100% { transform: translateY(0); opacity: 0.4; }
+      40%           { transform: translateY(-4px); opacity: 1; }
+    }
+
+    /* ── Status bar ────────────────────────────────────────────────────────── */
+    #status-bar {
+      padding: 7px 16px;
+      font-size: 10.5px;
+      color: var(--text-dim);
+      border-top: 1px solid var(--border);
+      background: rgba(0,0,0,0.25);
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+      flex-shrink: 0;
+      font-family: 'JetBrains Mono', monospace;
+    }
+
+    .status-indicator {
+      display: flex;
+      align-items: center;
+      gap: 6px;
+    }
+
+    .status-dot {
+      width: 5px;
+      height: 5px;
+      border-radius: 50%;
+      flex-shrink: 0;
+    }
+    .dot-green {
+      background: var(--green);
+      box-shadow: 0 0 5px var(--green-glow);
+    }
+    .dot-red { background: var(--red); }
+
+    #latency-badge { color: var(--text-dim); letter-spacing: 0.02em; }
+
+    /* ── Map ───────────────────────────────────────────────────────────────── */
+    #map { flex: 1; z-index: 1; }
+    .leaflet-tile { filter: invert(1) hue-rotate(180deg) brightness(0.82) contrast(0.88) saturate(0.9); }
+    .leaflet-container { background: #111827; }
+
+    /* ── Map overlay card ──────────────────────────────────────────────────── */
+    #map-overlay {
+      position: absolute;
+      bottom: 28px;
+      right: 28px;
+      z-index: 999;
+      background: rgba(10,13,22,0.92);
+      backdrop-filter: blur(20px);
+      border: 1px solid var(--border-mid);
+      border-radius: var(--radius);
+      padding: 16px 18px;
+      min-width: 230px;
+      max-width: 300px;
+      display: none;
+      animation: slideUp 0.22s cubic-bezier(0.34,1.56,0.64,1);
+      box-shadow: 0 16px 48px rgba(0,0,0,0.6), 0 0 0 1px rgba(255,255,255,0.04);
+    }
+    @keyframes slideUp {
+      from { opacity: 0; transform: translateY(10px) scale(0.97); }
+      to   { opacity: 1; transform: translateY(0) scale(1); }
+    }
+
+    .overlay-header { display: flex; align-items: center; gap: 10px; margin-bottom: 10px; }
+    #overlay-flag { font-size: 28px; line-height: 1; flex-shrink: 0; }
+    .overlay-title-wrap { min-width: 0; }
+    #overlay-name { font-size: 15px; font-weight: 700; color: var(--text); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+    #overlay-country { font-size: 11px; color: var(--text-muted); margin-top: 1px; }
+
+    .overlay-divider { height: 1px; background: var(--border); margin: 8px 0; }
+
+    .overlay-row {
+      display: flex;
+      align-items: center;
+      gap: 8px;
+      font-size: 12px;
+      color: var(--text-muted);
+      margin-bottom: 4px;
+    }
+    .overlay-row:last-child { margin-bottom: 0; }
+    .overlay-icon { font-size: 13px; flex-shrink: 0; }
+
+    #overlay-coords {
+      font-size: 10.5px;
+      color: var(--text-dim);
+      font-family: 'JetBrains Mono', monospace;
+      margin-top: 8px;
+      letter-spacing: 0.03em;
+    }
+
+    /* ── Leaflet popup ─────────────────────────────────────────────────────── */
+    .leaflet-popup-content-wrapper {
+      background: rgba(10,13,22,0.94) !important;
+      backdrop-filter: blur(16px);
+      border: 1px solid var(--border-mid) !important;
+      border-radius: 10px !important;
+      color: var(--text) !important;
+      box-shadow: 0 12px 40px rgba(0,0,0,0.6) !important;
+    }
+    .leaflet-popup-tip { background: rgba(10,13,22,0.94) !important; }
+    .leaflet-popup-content { font-family: 'Outfit', sans-serif !important; font-size: 13px !important; }
+    .popup-title { font-weight: 700; font-size: 13.5px; margin-bottom: 3px; }
+    .popup-detail { color: var(--text-muted); font-size: 11.5px; }
+
+    /* ── Responsive ────────────────────────────────────────────────────────── */
+    @media (max-width: 700px) {
+      #app { flex-direction: column; }
+      #panel { width: 100%; min-width: unset; height: 55%; border-right: none; border-bottom: 1px solid var(--border); }
+      #map { height: 45%; }
+      --panel-w: 100%;
+    }
+  </style>
+</head>
+<body>
+<div id="app">
+
+  <!-- ── Panel ────────────────────────────────────────────────────────────── -->
+  <div id="panel">
+
+    <div id="panel-header">
+      <div class="logo">
+        <div class="logo-icon">
+          <svg viewBox="0 0 24 24" fill="none" stroke="white" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+            <circle cx="12" cy="12" r="9"/>
+            <path d="M3 12h18M12 3a15 15 0 0 1 4 9 15 15 0 0 1-4 9 15 15 0 0 1-4-9 15 15 0 0 1 4-9z"/>
+          </svg>
+        </div>
+        <div class="logo-wordmark">
+          <div class="logo-text">GEO<em>LINK</em></div>
+          <div class="logo-sub">Location Intelligence</div>
+        </div>
+      </div>
+      <div class="tagline">Real-time autocomplete · 13M+ places worldwide</div>
+    </div>
+
+    <div id="search-wrap">
+      <span id="search-icon">
+        <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round">
+          <circle cx="11" cy="11" r="8"/><path d="m21 21-4.35-4.35"/>
+        </svg>
+      </span>
+      <input
+        id="search-input"
+        type="text"
+        placeholder="Search cities, regions, landmarks…"
+        autocomplete="off"
+        spellcheck="false"
+        aria-label="Search places"
+      />
+      <button id="clear-btn" aria-label="Clear search">
+        <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round">
+          <path d="M18 6 6 18M6 6l12 12"/>
+        </svg>
+      </button>
+      <div id="spinner"></div>
+    </div>
+
+    <div id="controls">
+      <span class="results-count" id="results-count"></span>
+      <div class="controls-right">
+        <label class="toggle-wrap" title="Toggle personalisation for your IP">
+          <span class="toggle-label">Personalised</span>
+          <span class="toggle-switch">
+            <input type="checkbox" id="personalize-toggle" checked />
+            <span class="toggle-track"><span class="toggle-thumb"></span></span>
+          </span>
+        </label>
+        <button id="clear-history-btn" class="clear-history-btn" title="Clear my search history">Clear History</button>
+      </div>
+    </div>
+
+    <div class="divider"></div>
+
+    <div id="results">
+      <div id="empty-state">
+        <div class="state-msg">
+          <svg class="empty-graphic" viewBox="0 0 64 64" fill="none" xmlns="http://www.w3.org/2000/svg">
+            <circle cx="32" cy="32" r="28" stroke="currentColor" stroke-width="1.5"/>
+            <circle cx="32" cy="32" r="16" stroke="currentColor" stroke-width="1"/>
+            <circle cx="32" cy="32" r="4" stroke="currentColor" stroke-width="1.5"/>
+            <line x1="4" y1="32" x2="28" y2="32" stroke="currentColor" stroke-width="1.5"/>
+            <line x1="36" y1="32" x2="60" y2="32" stroke="currentColor" stroke-width="1.5"/>
+            <line x1="32" y1="4" x2="32" y2="28" stroke="currentColor" stroke-width="1.5"/>
+            <line x1="32" y1="36" x2="32" y2="60" stroke="currentColor" stroke-width="1.5"/>
+          </svg>
+          <div class="state-title">Search the world</div>
+          <div class="state-sub">Cities · Regions · Landmarks · Mountains<br/>13M+ named places</div>
+        </div>
+      </div>
+    </div>
+
+    <div id="status-bar">
+      <span id="api-status" class="status-indicator">
+        <span class="status-dot dot-green"></span>
+        <span>API connected</span>
+      </span>
+      <span id="latency-badge"></span>
+    </div>
+  </div>
+
+  <!-- ── Map ──────────────────────────────────────────────────────────────── -->
+  <div id="map"></div>
+
+  <!-- ── Floating result card ─────────────────────────────────────────────── -->
+  <div id="map-overlay">
+    <div class="overlay-header">
+      <div id="overlay-flag"></div>
+      <div class="overlay-title-wrap">
+        <div id="overlay-name"></div>
+        <div id="overlay-country"></div>
+      </div>
+    </div>
+    <div class="overlay-divider"></div>
+    <div id="overlay-feature" class="overlay-row">
+      <span class="overlay-icon">📍</span>
+      <span id="overlay-feature-label"></span>
+    </div>
+    <div class="overlay-row">
+      <span class="overlay-icon">👥</span>
+      <span id="overlay-pop"></span>
+    </div>
+    <div id="overlay-coords"></div>
+  </div>
+</div>
+
+<script src="https://unpkg.com/leaflet@1.9.4/dist/leaflet.js"></script>
+<script>
+'use strict';
+
+// ── Config ────────────────────────────────────────────────────────────────────
+const API = '/api/v1';
+const DEBOUNCE_MS = 200;
+
+// ── State ─────────────────────────────────────────────────────────────────────
+let debounceTimer = null;
+let currentMarker = null;
+let selectedIndex = -1;
+let lastResults = [];
+let clientIP = '';
+let currentPage = 1;
+let currentQuery = '';
+let currentTotal = 0;
+let isLoadingMore = false;
+
+// ── Leaflet map ───────────────────────────────────────────────────────────────
+const map = L.map('map', {
+  center: [20, 0], zoom: 2,
+  zoomControl: false,
+  attributionControl: false,
+});
+L.control.zoom({ position: 'bottomright' }).addTo(map);
+L.control.attribution({ position: 'bottomright', prefix: false })
+  .addTo(map)
+  .setPrefix('© OpenStreetMap');
+
+L.tileLayer('https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png', { maxZoom: 18 }).addTo(map);
+
+const pinIcon = L.divIcon({
+  className: '',
+  html: `<div style="
+    width:26px;height:26px;border-radius:50% 50% 50% 0;
+    background:linear-gradient(135deg,#38bdf8,#2563eb);
+    border:2.5px solid #fff;
+    box-shadow:0 4px 16px rgba(56,189,248,0.55);
+    transform:rotate(-45deg);
+  "></div>`,
+  iconSize: [26, 26],
+  iconAnchor: [13, 26],
+  popupAnchor: [0, -30],
+});
+
+// ── Elements ──────────────────────────────────────────────────────────────────
+const searchInput     = document.getElementById('search-input');
+const clearBtn        = document.getElementById('clear-btn');
+const spinner         = document.getElementById('spinner');
+const resultsDiv      = document.getElementById('results');
+const resultsCount    = document.getElementById('results-count');
+const latencyBadge    = document.getElementById('latency-badge');
+const apiStatus       = document.getElementById('api-status');
+const personToggle    = document.getElementById('personalize-toggle');
+const clearHistoryBtn = document.getElementById('clear-history-btn');
+const overlay         = document.getElementById('map-overlay');
+
+// ── Helpers ───────────────────────────────────────────────────────────────────
+function countryFlag(code) {
+  if (!code || code.length !== 2) return '🏳️';
+  return code.toUpperCase().replace(/./g,
+    c => String.fromCodePoint(0x1F1E6 - 65 + c.charCodeAt(0)));
+}
+
+function fmtPop(n) {
+  if (!n) return 'N/A';
+  if (n >= 1e6) return (n / 1e6).toFixed(1) + 'M';
+  if (n >= 1e3) return (n / 1e3).toFixed(0) + 'K';
+  return n.toLocaleString();
+}
+
+function showSpinner(on) {
+  spinner.style.display = on ? 'block' : 'none';
+  clearBtn.style.display = (!on && searchInput.value) ? 'block' : 'none';
+}
+
+function setAPIStatus(ok) {
+  apiStatus.innerHTML = ok
+    ? `<span class="status-dot dot-green"></span><span>API connected</span>`
+    : `<span class="status-dot dot-red"></span><span>API unreachable</span>`;
+}
+
+function showSkeletons(n = 5) {
+  resultsDiv.innerHTML = '';
+  for (let i = 0; i < n; i++) {
+    const sk = document.createElement('div');
+    sk.className = 'skeleton-item';
+    sk.style.animationDelay = `${i * 0.05}s`;
+    sk.innerHTML = `
+      <div class="sk-flag"></div>
+      <div class="sk-body">
+        <div class="sk-line wide"></div>
+        <div class="sk-line med"></div>
+        <div class="sk-line short"></div>
+      </div>`;
+    resultsDiv.appendChild(sk);
+  }
+}
+
+// ── Resolve IP → load recommendations ────────────────────────────────────────
+async function resolveIP() {
+  try {
+    const r = await fetch(`${API}/health`);
+    if (r.ok) setAPIStatus(true);
+  } catch { setAPIStatus(false); }
+  try {
+    const ipRes = await fetch('https://api.ipify.org?format=json');
+    const ipData = await ipRes.json();
+    if (ipData.ip) clientIP = ipData.ip;
+  } catch {}
+}
+resolveIP().then(() => loadRecommendations());
+
+// ── Recommendations ───────────────────────────────────────────────────────────
+let cachedRecommendations = null;
+
+async function loadRecommendations() {
+  try {
+    const res = await fetch(`${API}/recommendations?limit=10&ip=${encodeURIComponent(clientIP)}`);
+    const data = await res.json();
+    cachedRecommendations = data;
+    if (!searchInput.value.trim()) renderRecommendations(data);
+  } catch {}
+}
+
+function renderRecommendations(data) {
+  const sections = data?.sections || [];
+  if (sections.length === 0) { renderEmptyStatic(); return; }
+
+  lastResults = sections.flatMap(s => s.items || []);
+  selectedIndex = -1;
+  resultsDiv.innerHTML = '';
+
+  let globalIndex = 0;
+  sections.forEach(section => {
+    const header = document.createElement('div');
+    header.className = 'section-header';
+    header.innerHTML = `
+      <span class="section-header-icon">${section.icon}</span>
+      <span class="section-header-label">${section.label}</span>`;
+    resultsDiv.appendChild(header);
+
+    (section.items || []).forEach(r => {
+      const idx = globalIndex++;
+      const item = document.createElement('div');
+      item.className = 'result-item';
+      item.setAttribute('role', 'option');
+      item.setAttribute('aria-selected', 'false');
+      item.innerHTML = `
+        <div class="result-flag">${countryFlag(r.country_code)}</div>
+        <div class="result-body">
+          <div class="result-name">${r.name}</div>
+          <div class="result-meta">
+            <span class="result-tag">${r.country_code}</span>
+            <span class="result-tag">${r.feature_label || r.feature_code}</span>
+          </div>
+          <div class="result-pop">${fmtPop(r.population)}</div>
+        </div>`;
+      item.addEventListener('click', () => selectResult(idx));
+      resultsDiv.appendChild(item);
+    });
+  });
+
+  const labels = sections.map(s => s.label).join(' · ');
+  resultsCount.textContent = labels;
+}
+
+// ── Search ────────────────────────────────────────────────────────────────────
+const PAGE_LIMIT = 15;
+
+async function doSearch(q) {
+  if (!q || q.trim().length < 1) { renderEmpty(); return; }
+
+  currentQuery = q;
+  currentPage = 1;
+  showSpinner(true);
+  showSkeletons(6);
+  resultsCount.textContent = '';
+
+  const personalized = personToggle.checked;
+  const url = `${API}/search?q=${encodeURIComponent(q)}&personalized=${personalized}&ip=${encodeURIComponent(clientIP)}&limit=${PAGE_LIMIT}&page=1`;
+  const t0 = performance.now();
+
+  try {
+    const res = await fetch(url);
+    const data = await res.json();
+    const ms = (performance.now() - t0).toFixed(0);
+
+    setAPIStatus(true);
+    latencyBadge.textContent = `${ms}ms · ${data.time_taken_ms}ms srv`;
+    lastResults = data.results || [];
+    currentTotal = data.total || lastResults.length;
+    selectedIndex = -1;
+    renderResults(data);
+  } catch (e) {
+    setAPIStatus(false);
+    renderError();
+  } finally {
+    showSpinner(false);
+    clearBtn.style.display = searchInput.value ? 'block' : 'none';
+  }
+}
+
+async function loadMore() {
+  if (isLoadingMore) return;
+  isLoadingMore = true;
+
+  const nextPage = currentPage + 1;
+  const personalized = personToggle.checked;
+  const url = `${API}/search?q=${encodeURIComponent(currentQuery)}&personalized=${personalized}&ip=${encodeURIComponent(clientIP)}&limit=${PAGE_LIMIT}&page=${nextPage}`;
+
+  const sentinel = document.getElementById('scroll-sentinel');
+  if (sentinel) sentinel.innerHTML = `<div class="dot-loader"><span></span><span></span><span></span></div>`;
+
+  try {
+    const res = await fetch(url);
+    const data = await res.json();
+    const newResults = data.results || [];
+
+    if (newResults.length > 0) {
+      currentPage = nextPage;
+      const startIdx = lastResults.length;
+      lastResults = lastResults.concat(newResults);
+      appendResults(newResults, startIdx);
+    }
+  } catch (e) {
+    if (sentinel) sentinel.innerHTML = `<span style="font-size:11px;color:var(--text-dim)">Scroll for more</span>`;
+  } finally {
+    isLoadingMore = false;
+  }
+}
+
+// ── Render ────────────────────────────────────────────────────────────────────
+function renderEmpty() {
+  detachSentinel();
+  lastResults = [];
+  selectedIndex = -1;
+  currentPage = 1;
+  currentTotal = 0;
+  currentQuery = '';
+  overlay.style.display = 'none';
+  if (cachedRecommendations) {
+    renderRecommendations(cachedRecommendations);
+  } else {
+    renderEmptyStatic();
+  }
+}
+
+function renderEmptyStatic() {
+  lastResults = [];
+  resultsCount.textContent = '';
+  resultsDiv.innerHTML = '';
+  const msg = document.createElement('div');
+  msg.innerHTML = `
+    <div class="state-msg">
+      <svg class="empty-graphic" viewBox="0 0 64 64" fill="none" xmlns="http://www.w3.org/2000/svg">
+        <circle cx="32" cy="32" r="28" stroke="currentColor" stroke-width="1.5"/>
+        <circle cx="32" cy="32" r="16" stroke="currentColor" stroke-width="1"/>
+        <circle cx="32" cy="32" r="4" stroke="currentColor" stroke-width="1.5"/>
+        <line x1="4" y1="32" x2="28" y2="32" stroke="currentColor" stroke-width="1.5"/>
+        <line x1="36" y1="32" x2="60" y2="32" stroke="currentColor" stroke-width="1.5"/>
+        <line x1="32" y1="4" x2="32" y2="28" stroke="currentColor" stroke-width="1.5"/>
+        <line x1="32" y1="36" x2="32" y2="60" stroke="currentColor" stroke-width="1.5"/>
+      </svg>
+      <div class="state-title">Search the world</div>
+      <div class="state-sub">Cities · Regions · Landmarks · Mountains<br/>13M+ named places</div>
+    </div>`;
+  resultsDiv.appendChild(msg);
+  overlay.style.display = 'none';
+}
+
+function renderError() {
+  resultsDiv.innerHTML = `
+    <div class="state-msg">
+      <div class="state-icon">⚠️</div>
+      <div class="state-title">API unreachable</div>
+      <div class="state-sub">Is the server running?<br/>
+        <code style="font-family:'JetBrains Mono',monospace;font-size:10px;color:var(--text-dim)">go run ./cmd/api</code>
+      </div>
+    </div>`;
+  resultsCount.textContent = '';
+}
+
+function makeResultItem(r, idx) {
+  const item = document.createElement('div');
+  item.className = 'result-item';
+  item.setAttribute('role', 'option');
+  item.setAttribute('aria-selected', 'false');
+
+  const scoreWidth = Math.round(Math.min((r.score || 0) * 100, 100));
+  const boostBadge = r.boosted ? `<span class="badge-boosted">★ Boosted</span>` : '';
+
+  item.innerHTML = `
+    <div class="result-flag">${countryFlag(r.country_code)}</div>
+    <div class="result-body">
+      <div class="result-name">${r.name}</div>
+      <div class="result-meta">
+        <span class="result-tag">${r.country_code}</span>
+        <span class="result-tag">${r.feature_label || r.feature_code}</span>
+        ${boostBadge}
+      </div>
+      <div class="result-pop">${fmtPop(r.population)}</div>
+      <div class="result-score-bar" style="width:${scoreWidth}%"></div>
+    </div>`;
+
+  item.addEventListener('click', () => selectResult(idx));
+  return item;
+}
+
+// ── Infinite scroll sentinel ──────────────────────────────────────────────────
+let scrollObserver = null;
+
+function detachSentinel() {
+  if (scrollObserver) { scrollObserver.disconnect(); scrollObserver = null; }
+  const s = document.getElementById('scroll-sentinel');
+  if (s) s.remove();
+}
+
+function attachSentinel() {
+  detachSentinel();
+  if (lastResults.length >= currentTotal) return;
+
+  const sentinel = document.createElement('div');
+  sentinel.id = 'scroll-sentinel';
+  sentinel.innerHTML = `<div class="dot-loader"><span></span><span></span><span></span></div>`;
+  resultsDiv.appendChild(sentinel);
+
+  scrollObserver = new IntersectionObserver(entries => {
+    if (entries[0].isIntersecting) loadMore();
+  }, { root: resultsDiv, threshold: 0.1 });
+
+  scrollObserver.observe(sentinel);
+}
+
+function updateResultsCount(personalized) {
+  const shown = lastResults.length;
+  const personLabel = personalized ? ' ✦' : '';
+  resultsCount.textContent = `${shown.toLocaleString()} / ${currentTotal.toLocaleString()}${personLabel}`;
+}
+
+function appendResults(results, startIdx) {
+  detachSentinel();
+  results.forEach((r, i) => resultsDiv.appendChild(makeResultItem(r, startIdx + i)));
+  updateResultsCount(false);
+  attachSentinel();
+}
+
+function renderResults(data) {
+  detachSentinel();
+  const results = data.results || [];
+  resultsDiv.innerHTML = '';
+
+  if (results.length === 0) {
+    resultsDiv.innerHTML = `
+      <div class="state-msg">
+        <div class="state-icon">🔍</div>
+        <div class="state-title">No places found</div>
+        <div class="state-sub">Try a different search term</div>
+      </div>`;
+    resultsCount.textContent = '';
+    return;
+  }
+
+  currentTotal = data.total || results.length;
+  updateResultsCount(data.personalized);
+  results.forEach((r, i) => resultsDiv.appendChild(makeResultItem(r, i)));
+  attachSentinel();
+}
+
+function selectResult(i) {
+  const r = lastResults[i];
+  if (!r) return;
+
+  document.querySelectorAll('.result-item').forEach((el, idx) => {
+    el.classList.toggle('selected', idx === i);
+  });
+  selectedIndex = i;
+
+  fetch(`${API}/events/search?ip=${encodeURIComponent(clientIP)}`, {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ query: r.name, country_code: r.country_code, feature_code: r.feature_code })
+  }).catch(() => {});
+
+  const latlng = [r.latitude, r.longitude];
+  const zoom = r.population > 1_000_000 ? 10 : r.population > 50_000 ? 12 : 13;
+  map.flyTo(latlng, zoom, { duration: 0.8 });
+
+  if (currentMarker) map.removeLayer(currentMarker);
+  currentMarker = L.marker(latlng, { icon: pinIcon }).addTo(map);
+
+  const popupHtml = `
+    <div class="popup-title">${countryFlag(r.country_code)} ${r.name}</div>
+    <div class="popup-detail">${r.country_code} · ${r.feature_label || r.feature_code}</div>
+    <div class="popup-detail" style="margin-top:3px">👥 ${fmtPop(r.population)}</div>
+    ${r.boosted ? '<div style="color:#fbbf24;font-size:10.5px;margin-top:4px">★ Personalised match</div>' : ''}
+  `;
+  currentMarker.bindPopup(popupHtml).openPopup();
+
+  overlay.style.display = 'block';
+  document.getElementById('overlay-flag').textContent = countryFlag(r.country_code);
+  document.getElementById('overlay-name').textContent = r.name;
+  document.getElementById('overlay-country').textContent = r.country_code + (r.country_name ? ` · ${r.country_name}` : '');
+  document.getElementById('overlay-feature-label').textContent = r.feature_label || r.feature_code;
+  document.getElementById('overlay-pop').textContent = fmtPop(r.population) + ' people';
+  document.getElementById('overlay-coords').textContent = `${r.latitude.toFixed(4)}, ${r.longitude.toFixed(4)}`;
+}
+
+// ── Events ────────────────────────────────────────────────────────────────────
+searchInput.addEventListener('input', () => {
+  const q = searchInput.value.trim();
+  clearBtn.style.display = q ? 'block' : 'none';
+  clearTimeout(debounceTimer);
+  if (!q) { renderEmpty(); return; }
+  showSpinner(true);
+  debounceTimer = setTimeout(() => doSearch(q), DEBOUNCE_MS);
+});
+
+clearBtn.addEventListener('click', () => {
+  searchInput.value = '';
+  clearBtn.style.display = 'none';
+  renderEmpty();
+  searchInput.focus();
+});
+
+searchInput.addEventListener('keydown', (e) => {
+  const items = document.querySelectorAll('.result-item');
+  if (!items.length) return;
+
+  if (e.key === 'ArrowDown') {
+    e.preventDefault();
+    selectedIndex = Math.min(selectedIndex + 1, items.length - 1);
+    items[selectedIndex]?.scrollIntoView({ block: 'nearest' });
+    items.forEach((el, i) => el.classList.toggle('selected', i === selectedIndex));
+  } else if (e.key === 'ArrowUp') {
+    e.preventDefault();
+    selectedIndex = Math.max(selectedIndex - 1, 0);
+    items[selectedIndex]?.scrollIntoView({ block: 'nearest' });
+    items.forEach((el, i) => el.classList.toggle('selected', i === selectedIndex));
+  } else if (e.key === 'Enter' && selectedIndex >= 0) {
+    selectResult(selectedIndex);
+  } else if (e.key === 'Escape') {
+    searchInput.blur();
+  }
+});
+
+personToggle.addEventListener('change', async () => {
+  const enabled = personToggle.checked;
+  const adminKey = 'your-secret-key-here';
+  try {
+    await fetch(`${API}/toggle/ip`, {
+      method: 'PUT',
+      headers: { 'Content-Type': 'application/json', 'X-Admin-Key': adminKey },
+      body: JSON.stringify({ enabled, ip: clientIP }),
+    });
+  } catch {}
+  if (searchInput.value) doSearch(searchInput.value);
+});
+
+clearHistoryBtn.addEventListener('click', async () => {
+  try {
+    const origText = clearHistoryBtn.textContent;
+    clearHistoryBtn.textContent = 'Clearing…';
+    clearHistoryBtn.disabled = true;
+
+    await fetch(`${API}/profile/reset?ip=${encodeURIComponent(clientIP)}`, { method: 'DELETE' });
+
+    clearHistoryBtn.textContent = 'Cleared!';
+    setTimeout(() => {
+      clearHistoryBtn.textContent = origText;
+      clearHistoryBtn.disabled = false;
+    }, 1500);
+
+    await loadRecommendations();
+    if (!searchInput.value) renderEmpty();
+  } catch {
+    clearHistoryBtn.textContent = 'Failed';
+    setTimeout(() => {
+      clearHistoryBtn.textContent = 'Clear History';
+      clearHistoryBtn.disabled = false;
+    }, 1500);
+  }
+});
+
+map.on('click', () => { overlay.style.display = 'none'; });
+</script>
+</body>
+</html>

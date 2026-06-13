@@ -1,0 +1,54 @@
+# Environment — secrets live here
+.env
+.env.local
+.env.*.local
+
+# Compiled Go binaries (root-level builds)
+/api
+/bulkimport
+/personalizer
+
+# Standard Go build output
+*.exe
+*.exe~
+*.dll
+*.so
+*.dylib
+*.test
+*.out
+/bin/
+/dist/
+
+# GeoNames data — allCountries.txt is 1.7GB, never commit
+data/*.txt
+data/*.zip
+data/*.csv
+data/*.tsv
+# keep the placeholder
+!data/.gitkeep
+
+# Go workspace / vendor
+vendor/
+go.work
+go.work.sum
+
+# IDE
+.idea/
+.vscode/
+*.swp
+*.swo
+*~
+
+# OS
+.DS_Store
+Thumbs.db
+
+# Docker volumes / local overrides
+docker-compose.override.yml
+
+# Test coverage
+coverage.out
+coverage.html
+
+# Claude Code internal
+.claude/

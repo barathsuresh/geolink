@@ -1,0 +1,2 @@
+-- migrations/001_create_geonames.sql is intentionally the only migration in Phase 1.
+-- Future migrations will be numbered sequentially: 002_..., 003_..., etc.

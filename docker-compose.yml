@@ -1,0 +1,75 @@
+services:
+
+  kafka:
+    image: confluentinc/cp-kafka:7.6.0
+    hostname: kafka
+    container_name: kafka
+    ports:
+      - "9092:9092"   # host → broker (Go services connect here from the host)
+      - "9101:9101"   # JMX metrics
+    environment:
+      KAFKA_NODE_ID: 1
+      KAFKA_LISTENER_SECURITY_PROTOCOL_MAP: "CONTROLLER:PLAINTEXT,PLAINTEXT:PLAINTEXT,PLAINTEXT_HOST:PLAINTEXT"
+      # PLAINTEXT        = internal container-to-container traffic (kafka:29092)
+      # PLAINTEXT_HOST   = host machine access (localhost:9092)
+      # Both are advertised so that partition leader metadata resolves correctly
+      # whether you're connecting from inside Docker or from the host.
+      KAFKA_ADVERTISED_LISTENERS: "PLAINTEXT://kafka:29092,PLAINTEXT_HOST://localhost:9092"
+      KAFKA_OFFSETS_TOPIC_REPLICATION_FACTOR: 1
+      KAFKA_GROUP_INITIAL_REBALANCE_DELAY_MS: 0
+      KAFKA_TRANSACTION_STATE_LOG_MIN_ISR: 1
+      KAFKA_TRANSACTION_STATE_LOG_REPLICATION_FACTOR: 1
+      KAFKA_JMX_PORT: 9101
+      KAFKA_JMX_HOSTNAME: localhost
+      KAFKA_PROCESS_ROLES: "broker,controller"
+      KAFKA_CONTROLLER_QUORUM_VOTERS: "1@kafka:29093"
+      KAFKA_LISTENERS: "PLAINTEXT://kafka:29092,CONTROLLER://kafka:29093,PLAINTEXT_HOST://0.0.0.0:9092"
+      KAFKA_INTER_BROKER_LISTENER_NAME: "PLAINTEXT"
+      KAFKA_CONTROLLER_LISTENER_NAMES: "CONTROLLER"
+      KAFKA_LOG_DIRS: "/var/lib/kafka/data"
+      # CLUSTER_ID: valid base64 UUID. Regenerate with:
+      #   docker run --rm confluentinc/cp-kafka:7.6.0 kafka-storage random-uuid
+      CLUSTER_ID: "MkU3OEVBNTcwNTJENDM2Qg"
+    volumes:
+      - kafka_data:/var/lib/kafka/data
+
+  # ─── PostgreSQL 16 ────────────────────────────────────────────────────────────
+  # Stores full GeoNames records for authoritative lookups and analytics.
+  postgres:
+    image: postgres:16-alpine
+    container_name: postgres
+    ports:
+      - "5432:5432"
+    environment:
+      POSTGRES_USER: geolink
+      POSTGRES_PASSWORD: geolink
+      POSTGRES_DB: geolink
+    volumes:
+      - postgres_data:/var/lib/postgresql/data
+
+  # ─── Redis 7 ─────────────────────────────────────────────────────────────────
+  # IP-keyed search-history profiles and velocity (rate-limit) counters.
+  redis:
+    image: redis:7-alpine
+    container_name: redis
+    ports:
+      - "6379:6379"
+
+  # ─── Typesense 0.25.2 ────────────────────────────────────────────────────────
+  # Full-text + typo-tolerant search engine hosting the 12M GeoNames collection.
+  typesense:
+    image: typesense/typesense:0.25.2
+    container_name: typesense
+    ports:
+      - "8108:8108"
+    volumes:
+      - typesense_data:/data
+    command: >
+      --data-dir /data
+      --api-key=geolink-local-key
+      --enable-cors
+
+volumes:
+  kafka_data:
+  postgres_data:
+  typesense_data:
