@@ -53,5 +53,8 @@ coverage.html
 # Demo GIF — large binary, regenerate with: vhs demo/demo.tape
 # demo/demo.gif
 
+# Kubernetes secrets — never commit real credentials
+k8s/secrets.yaml
+
 # Claude Code internal
 .claude/

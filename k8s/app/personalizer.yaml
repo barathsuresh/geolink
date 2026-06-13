@@ -1,0 +1,60 @@
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: personalizer
+  namespace: geolink
+spec:
+  replicas: 1
+  selector:
+    matchLabels:
+      app: personalizer
+  template:
+    metadata:
+      labels:
+        app: personalizer
+    spec:
+      containers:
+        - name: personalizer
+          image: geolink-personalizer:latest
+          imagePullPolicy: Never
+          ports:
+            - containerPort: 8080
+          envFrom:
+            - configMapRef:
+                name: geolink-config
+          env:
+            - name: POSTGRES_PASSWORD
+              valueFrom:
+                secretKeyRef:
+                  name: geolink-secrets
+                  key: POSTGRES_PASSWORD
+            - name: REDIS_PASSWORD
+              valueFrom:
+                secretKeyRef:
+                  name: geolink-secrets
+                  key: REDIS_PASSWORD
+            - name: TYPESENSE_API_KEY
+              valueFrom:
+                secretKeyRef:
+                  name: geolink-secrets
+                  key: TYPESENSE_API_KEY
+            - name: ADMIN_API_KEY
+              valueFrom:
+                secretKeyRef:
+                  name: geolink-secrets
+                  key: ADMIN_API_KEY
+          # personalizer exposes /healthz on PORT (default 8080)
+          readinessProbe:
+            httpGet:
+              path: /healthz
+              port: 8080
+            initialDelaySeconds: 15
+            periodSeconds: 10
+            failureThreshold: 6
+          resources:
+            requests:
+              memory: "64Mi"
+              cpu: "50m"
+            limits:
+              memory: "256Mi"
+              cpu: "200m"

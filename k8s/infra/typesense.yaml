@@ -1,0 +1,69 @@
+apiVersion: apps/v1
+kind: StatefulSet
+metadata:
+  name: typesense
+  namespace: geolink
+spec:
+  serviceName: typesense
+  replicas: 1
+  selector:
+    matchLabels:
+      app: typesense
+  template:
+    metadata:
+      labels:
+        app: typesense
+    spec:
+      containers:
+        - name: typesense
+          image: typesense/typesense:0.25.2
+          args:
+            - "--data-dir=/data"
+            - "--api-key=$(TYPESENSE_API_KEY)"
+            - "--enable-cors"
+          ports:
+            - containerPort: 8108
+          env:
+            - name: TYPESENSE_API_KEY
+              valueFrom:
+                secretKeyRef:
+                  name: geolink-secrets
+                  key: TYPESENSE_API_KEY
+          volumeMounts:
+            - name: typesense-data
+              mountPath: /data
+          readinessProbe:
+            httpGet:
+              path: /health
+              port: 8108
+            initialDelaySeconds: 15
+            periodSeconds: 5
+            failureThreshold: 6
+          resources:
+            requests:
+              memory: "2Gi"
+              cpu: "500m"
+            limits:
+              memory: "8Gi"
+              cpu: "2000m"
+  volumeClaimTemplates:
+    - metadata:
+        name: typesense-data
+      spec:
+        accessModes: ["ReadWriteOnce"]
+        storageClassName: standard
+        resources:
+          requests:
+            storage: 10Gi
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: typesense
+  namespace: geolink
+spec:
+  selector:
+    app: typesense
+  ports:
+    - port: 8108
+      targetPort: 8108

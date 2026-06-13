@@ -1,0 +1,77 @@
+# PVC for GeoNames data file.
+# Populated via: make copy-data  (copies host data/allCountries.txt → minikube node)
+apiVersion: v1
+kind: PersistentVolume
+metadata:
+  name: geonames-pv
+spec:
+  capacity:
+    storage: 3Gi
+  accessModes: ["ReadWriteOnce"]
+  persistentVolumeReclaimPolicy: Retain
+  storageClassName: standard
+  hostPath:
+    path: /tmp/geonames
+    type: DirectoryOrCreate
+---
+apiVersion: v1
+kind: PersistentVolumeClaim
+metadata:
+  name: geonames-data
+  namespace: geolink
+spec:
+  accessModes: ["ReadWriteOnce"]
+  storageClassName: standard
+  resources:
+    requests:
+      storage: 3Gi
+  volumeName: geonames-pv
+---
+apiVersion: batch/v1
+kind: Job
+metadata:
+  name: bulkimport
+  namespace: geolink
+spec:
+  ttlSecondsAfterFinished: 3600
+  template:
+    spec:
+      restartPolicy: OnFailure
+      containers:
+        - name: bulkimport
+          image: geolink-bulkimport:latest
+          imagePullPolicy: Never
+          args: ["-truncate", "-workers", "16", "-batch", "50000"]
+          envFrom:
+            - configMapRef:
+                name: geolink-config
+          env:
+            - name: POSTGRES_PASSWORD
+              valueFrom:
+                secretKeyRef:
+                  name: geolink-secrets
+                  key: POSTGRES_PASSWORD
+            - name: TYPESENSE_API_KEY
+              valueFrom:
+                secretKeyRef:
+                  name: geolink-secrets
+                  key: TYPESENSE_API_KEY
+            - name: ADMIN_API_KEY
+              valueFrom:
+                secretKeyRef:
+                  name: geolink-secrets
+                  key: ADMIN_API_KEY
+          volumeMounts:
+            - name: geonames-data
+              mountPath: /data
+          resources:
+            requests:
+              memory: "4Gi"
+              cpu: "8000m"
+            limits:
+              memory: "8Gi"
+              cpu: "14000m"
+      volumes:
+        - name: geonames-data
+          persistentVolumeClaim:
+            claimName: geonames-data

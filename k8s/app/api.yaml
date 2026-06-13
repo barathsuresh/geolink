@@ -1,0 +1,73 @@
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: api
+  namespace: geolink
+spec:
+  replicas: 1
+  selector:
+    matchLabels:
+      app: api
+  template:
+    metadata:
+      labels:
+        app: api
+    spec:
+      containers:
+        - name: api
+          image: geolink-api:latest
+          imagePullPolicy: Never
+          ports:
+            - containerPort: 8080
+          envFrom:
+            - configMapRef:
+                name: geolink-config
+          env:
+            - name: POSTGRES_PASSWORD
+              valueFrom:
+                secretKeyRef:
+                  name: geolink-secrets
+                  key: POSTGRES_PASSWORD
+            - name: REDIS_PASSWORD
+              valueFrom:
+                secretKeyRef:
+                  name: geolink-secrets
+                  key: REDIS_PASSWORD
+            - name: TYPESENSE_API_KEY
+              valueFrom:
+                secretKeyRef:
+                  name: geolink-secrets
+                  key: TYPESENSE_API_KEY
+            - name: ADMIN_API_KEY
+              valueFrom:
+                secretKeyRef:
+                  name: geolink-secrets
+                  key: ADMIN_API_KEY
+          readinessProbe:
+            httpGet:
+              path: /api/v1/health
+              port: 8080
+            initialDelaySeconds: 15
+            periodSeconds: 10
+            failureThreshold: 6
+          resources:
+            requests:
+              memory: "128Mi"
+              cpu: "100m"
+            limits:
+              memory: "512Mi"
+              cpu: "500m"
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: api
+  namespace: geolink
+spec:
+  type: NodePort
+  selector:
+    app: api
+  ports:
+    - port: 8080
+      targetPort: 8080
+      nodePort: 30080

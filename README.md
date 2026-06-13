@@ -106,10 +106,11 @@ Three sections, fetched concurrently, returned in priority order:
 | Language | Go 1.25 | Single static binary, low GC pressure, fast HTTP |
 | HTTP | Gin | Fastest Go router; idiomatic middleware chain |
 | Search | Typesense (self-hosted) | Sub-5 ms full-text, typo-tolerance, no JVM |
-| Messaging | Apache Kafka (KRaft) | Durable event log decouples search path from profile writes |
+| Messaging | Apache Kafka 3.7 (KRaft) | Durable event log decouples search path from profile writes |
 | Database | PostgreSQL 16 | Source of truth; `COPY` + UNLOGGED for bulk ingest |
 | Cache / Profiles | Redis 7 | Atomic `HINCRBY` counters + `LPUSH` ring buffers in < 1 ms |
 | Containerisation | Docker Compose | One-command local environment |
+| Orchestration | Kubernetes (Minikube) | Full local cluster with persistent volumes |
 
 ---
 
@@ -458,6 +459,99 @@ The event is not on the critical path — the user already received their result
 
 **Rate limiting design**
 Redis `INCR` + `EXPIRE`. The first request in a window sets the TTL; subsequent requests increment it. Fixed-window counter in O(1) Redis ops — no Lua script, no sidecar.
+
+---
+
+## Kubernetes Deployment (Local — Minikube)
+
+### Prerequisites
+
+- [Minikube](https://minikube.sigs.k8s.io/docs/start/) + kubectl
+- Docker
+- Go 1.25+
+- `make`
+
+### Cluster layout
+
+```
+geolink namespace
+├── infra
+│   ├── postgres     StatefulSet  (PVC: 5Gi)
+│   ├── redis        Deployment
+│   ├── kafka        StatefulSet  (PVC: 5Gi, apache/kafka:3.7.0 KRaft)
+│   └── typesense    StatefulSet  (PVC: 10Gi)
+└── app
+    ├── api          Deployment   (NodePort :30080)
+    ├── personalizer Deployment
+    └── bulkimport   Job          (hostPath PVC → /tmp/geonames)
+```
+
+### First-time setup
+
+```bash
+# 1. Start minikube (uses host resources — 16 CPU / 31 GB available)
+minikube start
+
+# 2. Build all images inside minikube's Docker daemon
+make images
+
+# 3. Copy the 1.7 GB GeoNames file to the minikube node (avoids re-download)
+make copy-data
+
+# 4. Deploy infra and wait for all pods ready
+make deploy-infra
+
+# 5. Run the one-shot import (~5 min with 16 workers)
+make import
+
+# 6. Deploy API + personalizer
+make deploy-app
+
+# 7. Open in browser
+make open
+```
+
+### Daily workflow
+
+```bash
+# Pause (pods stop, all data in PVCs survives)
+minikube stop
+
+# Resume (pods restart automatically)
+minikube start
+
+# Check pod status
+make status
+
+# View logs
+make logs-api
+make logs-personalizer
+make logs-kafka
+
+# Destroy everything
+make clean
+```
+
+### Makefile targets
+
+| Target | Description |
+|---|---|
+| `make images` | Build all 3 Docker images inside minikube |
+| `make copy-data` | Copy `data/allCountries.txt` → minikube node |
+| `make deploy-infra` | Apply + wait for Postgres, Redis, Kafka, Typesense |
+| `make deploy-app` | Apply + wait for API, personalizer |
+| `make deploy` | `deploy-infra` + `deploy-app` |
+| `make import` | Run bulkimport Job + follow logs |
+| `make status` | `kubectl get pods -n geolink` |
+| `make open` | Open API in browser via minikube |
+| `make clean` | Delete namespace + PV (full wipe) |
+
+### Secrets
+
+```bash
+# k8s/secrets.yaml is gitignored — copy and edit before deploying
+cp k8s/secrets.example.yaml k8s/secrets.yaml
+```
 
 ---
 
