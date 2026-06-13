@@ -8,6 +8,8 @@ GeoLink learns from each user's search history and re-ranks results so frequent 
 
 ## Demo
 
+![GeoLink terminal demo](demo/demo.gif)
+
 ```bash
 # Cold search — no personalisation
 curl "http://localhost:8080/api/v1/search?q=Manila&personalized=false"

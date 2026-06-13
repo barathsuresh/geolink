@@ -50,5 +50,8 @@ docker-compose.override.yml
 coverage.out
 coverage.html
 
+# Demo GIF — large binary, regenerate with: vhs demo/demo.tape
+# demo/demo.gif
+
 # Claude Code internal
 .claude/
